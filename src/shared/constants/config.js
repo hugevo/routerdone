@@ -6,6 +6,7 @@ export const APP_CONFIG = {
   description: "AI Gateway Management",
   version: pkg.version,
   gatewayVersion: "2.0.7",
+  coreVersion: "0.5.9",
 };
 
 // GitHub configuration

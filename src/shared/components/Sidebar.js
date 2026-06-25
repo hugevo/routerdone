@@ -66,7 +66,7 @@ export default function Sidebar({ onClose }) {
       .then(res => res.json())
       .then(data => {
         setVersionInfo(data);
-        setUpdateInfo(data.hasUpdate ? data : null);
+        setUpdateInfo(data.hasCoreUpdate ? data : null);
       })
       .catch(() => {});
   }, []);
@@ -130,9 +130,9 @@ export default function Sidebar({ onClose }) {
               <h1 className="text-lg font-semibold tracking-tight text-text-main">
                 {APP_CONFIG.name}
               </h1>
-              <span className="text-xs text-text-muted">Version: {APP_CONFIG.version}</span>
+              <span className="text-xs text-text-muted">Version: {APP_CONFIG.version}{versionInfo?.hasAppUpdate ? ` (update: ${versionInfo?.githubLatestVersion})` : ""}</span>
               <span className="text-[11px] text-text-subtle">
-                Core: {versionInfo?.latestVersion || "…"}
+                Core: {APP_CONFIG.coreVersion}{versionInfo?.hasCoreUpdate ? ` (latest: ${versionInfo?.latestVersion})` : ""}
               </span>
             </div>
           </Link>
