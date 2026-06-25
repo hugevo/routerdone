@@ -1,4 +1,4 @@
-import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, BUSY_CONNECTION_COOLDOWN_MS, MODEL_FAILURE_BACKOFF_BASE_MS, MODEL_FAILURE_BACKOFF_MAX_MS } from "../config/errorConfig.js";
+import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, BUSY_CONNECTION_COOLDOWN_MS, MODEL_FAILURE_BACKOFF_BASE_MS, MODEL_FAILURE_BACKOFF_MAX_MS, MODEL_FAILURE_IDLE_RESET_MS } from "../config/errorConfig.js";
 
 const BUSY_CONCURRENCY_TEXT = [
   "hệ thống đang bận",
@@ -67,6 +67,19 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
 
   // Default: transient cooldown for any unmatched error
   return { shouldFallback: true, cooldownMs: TRANSIENT_COOLDOWN_MS };
+}
+
+/** True for the rate-limit error class: HTTP 429 or a rate-limit text rule
+ *  (the `backoff: true` entries in ERROR_RULES). These get a fixed base cooldown
+ *  and are neutral to the per-model failure counter (no bump, no reset). */
+export function isRateLimitError(status, errorText) {
+  const lowerError = normalizeErrorText(errorText);
+  for (const rule of ERROR_RULES) {
+    if (!rule.backoff) continue;
+    if (rule.text && lowerError && lowerError.includes(rule.text)) return true;
+    if (rule.status && rule.status === status) return true;
+  }
+  return false;
 }
 
 export function isBusyConcurrencyError(errorText) {
@@ -213,6 +226,17 @@ export function getModelFailureKey(model) {
   return model ? `${MODEL_FAILURE_PREFIX}${model}` : MODEL_FAILURE_ALL;
 }
 
+/** Prefix for per-model last-failure timestamps (non-rate-limit failures only).
+ *  Drives time-based counter decay: after MODEL_FAILURE_IDLE_RESET_MS with no
+ *  new non-rate-limit failure, the counter resets to a fresh start. */
+export const MODEL_FAILURE_AT_PREFIX = "modelFailureAt_";
+export const MODEL_FAILURE_AT_ALL = `${MODEL_FAILURE_AT_PREFIX}__all`;
+
+/** Build the flat field key for a per-model last-failure timestamp. */
+export function getModelFailureAtKey(model) {
+  return model ? `${MODEL_FAILURE_AT_PREFIX}${model}` : MODEL_FAILURE_AT_ALL;
+}
+
 /** Read the stored consecutive-failure count for a model (or connection-level __all). */
 export function getModelFailureCount(connection, model) {
   if (!connection) return 0;
@@ -229,11 +253,26 @@ export function getModelBackoffCooldownMs(failureCount) {
 
 /** Bump the per-model consecutive-failure counter and return the resulting
  *  cooldown to apply as a model lock. Counters persist across lock expiry so
- *  that repeated failures keep escalating until a successful call resets them. */
-export function buildModelFailureBackoffUpdate(connection, model) {
-  const count = getModelFailureCount(connection, model) + 1;
+ *  that repeated failures keep escalating until a successful call resets them.
+ *
+ *  Rate-limit class errors (429 + rate-limit text rules) are neutral to the
+ *  counter: they block for a fixed MODEL_FAILURE_BACKOFF_BASE_MS without
+ *  bumping or resetting the counter, so consecutive 429s never double.
+ *  Non-rate-limit failures escalate (base * 2^(n-1)) and, after
+ *  MODEL_FAILURE_IDLE_RESET_MS with no new non-rate-limit failure, the counter
+ *  resets to a fresh start. */
+export function buildModelFailureBackoffUpdate(connection, model, { isRateLimit = false } = {}) {
+  const prevCount = getModelFailureCount(connection, model);
+  const atKey = getModelFailureAtKey(model);
+  const now = Date.now();
+  if (isRateLimit) {
+    return { count: prevCount, cooldownMs: MODEL_FAILURE_BACKOFF_BASE_MS, update: {} };
+  }
+  const lastAt = Number(connection?.[atKey]) || 0;
+  const idleLongEnough = lastAt > 0 && (now - lastAt) > MODEL_FAILURE_IDLE_RESET_MS;
+  const count = idleLongEnough ? 1 : prevCount + 1;
   const cooldownMs = getModelBackoffCooldownMs(count);
-  return { count, cooldownMs, update: { [getModelFailureKey(model)]: count } };
+  return { count, cooldownMs, update: { [getModelFailureKey(model)]: count, [atKey]: now } };
 }
 
 /** Build update object that clears the per-model failure counter on success.

@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   MODEL_FAILURE_PREFIX,
   MODEL_FAILURE_ALL,
@@ -7,11 +7,14 @@ import {
   getModelBackoffCooldownMs,
   buildModelFailureBackoffUpdate,
   buildClearModelFailureUpdate,
+  isRateLimitError,
+  getModelFailureAtKey,
   MODEL_LOCK_PREFIX,
 } from "../../open-sse/services/accountFallback.js";
 import {
   MODEL_FAILURE_BACKOFF_BASE_MS,
   MODEL_FAILURE_BACKOFF_MAX_MS,
+  MODEL_FAILURE_IDLE_RESET_MS,
 } from "../../open-sse/config/errorConfig.js";
 
 describe("per-model consecutive-failure backoff", () => {
@@ -48,12 +51,14 @@ describe("per-model consecutive-failure backoff", () => {
     const r1 = buildModelFailureBackoffUpdate({}, "gpt-4");
     expect(r1.count).toBe(1);
     expect(r1.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS);
-    expect(r1.update).toEqual({ "modelFailure_gpt-4": 1 });
+    expect(r1.update["modelFailure_gpt-4"]).toBe(1);
+    expect(r1.update[getModelFailureAtKey("gpt-4")]).toBeGreaterThan(0);
 
     const r2 = buildModelFailureBackoffUpdate({ "modelFailure_gpt-4": 1 }, "gpt-4");
     expect(r2.count).toBe(2);
     expect(r2.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS * 2);
-    expect(r2.update).toEqual({ "modelFailure_gpt-4": 2 });
+    expect(r2.update["modelFailure_gpt-4"]).toBe(2);
+    expect(r2.update[getModelFailureAtKey("gpt-4")]).toBeGreaterThan(0);
   });
 
   it("clears only the succeeded model counter, preserving others", () => {
@@ -72,5 +77,74 @@ describe("per-model consecutive-failure backoff", () => {
   it("returns empty update when nothing to clear", () => {
     expect(buildClearModelFailureUpdate({}, "gpt-4")).toEqual({});
     expect(buildClearModelFailureUpdate(null, "gpt-4")).toEqual({});
+  });
+});
+
+describe("429 rate-limit neutrality", () => {
+  it("429 keeps a fixed base cooldown without bumping the counter", () => {
+    const conn = { "modelFailure_gpt-4": 3, "modelFailureAt_gpt-4": Date.now() };
+    const r = buildModelFailureBackoffUpdate(conn, "gpt-4", { isRateLimit: true });
+    expect(r.count).toBe(3);
+    expect(r.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS);
+    expect(r.update).toEqual({});
+  });
+
+  it("consecutive 429s stay at 30s, never double", () => {
+    let r = buildModelFailureBackoffUpdate({ "modelFailure_gpt-4": 1 }, "gpt-4", { isRateLimit: true });
+    expect(r.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS);
+    r = buildModelFailureBackoffUpdate({ "modelFailure_gpt-4": 5 }, "gpt-4", { isRateLimit: true });
+    expect(r.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS);
+    expect(r.count).toBe(5);
+  });
+
+  it("429 is neutral: does not reset an existing counter", () => {
+    const r = buildModelFailureBackoffUpdate({ "modelFailure_gpt-4": 5 }, "gpt-4", { isRateLimit: true });
+    expect(r.count).toBe(5);
+  });
+
+  it("a non-rate-limit failure after a 429 continues escalating from the existing count", () => {
+    const conn = { "modelFailure_gpt-4": 3, "modelFailureAt_gpt-4": Date.now() };
+    const r = buildModelFailureBackoffUpdate(conn, "gpt-4", { isRateLimit: false });
+    expect(r.count).toBe(4);
+    expect(r.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS * 8);
+  });
+});
+
+describe("per-model failure counter time-decay", () => {
+  it("resets to a fresh start after MODEL_FAILURE_IDLE_RESET_MS with no new failure", () => {
+    const oldAt = Date.now() - (MODEL_FAILURE_IDLE_RESET_MS + 60000);
+    const conn = { "modelFailure_gpt-4": 7, "modelFailureAt_gpt-4": oldAt };
+    const r = buildModelFailureBackoffUpdate(conn, "gpt-4", { isRateLimit: false });
+    expect(r.count).toBe(1);
+    expect(r.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS);
+  });
+
+  it("does not decay while still within the idle window", () => {
+    const recentAt = Date.now() - 1000;
+    const conn = { "modelFailure_gpt-4": 2, "modelFailureAt_gpt-4": recentAt };
+    const r = buildModelFailureBackoffUpdate(conn, "gpt-4", { isRateLimit: false });
+    expect(r.count).toBe(3);
+  });
+
+  it("idle reset window is larger than the max backoff cap", () => {
+    expect(MODEL_FAILURE_IDLE_RESET_MS).toBeGreaterThan(MODEL_FAILURE_BACKOFF_MAX_MS);
+  });
+});
+
+describe("isRateLimitError classification", () => {
+  it("treats HTTP 429 as a rate-limit error", () => {
+    expect(isRateLimitError(429, "")).toBe(true);
+  });
+
+  it("treats rate-limit text rules as rate-limit errors", () => {
+    expect(isRateLimitError(503, "overloaded")).toBe(true);
+    expect(isRateLimitError(503, "rate limit exceeded")).toBe(true);
+    expect(isRateLimitError(429, "too many requests")).toBe(true);
+  });
+
+  it("does not classify server/auth errors as rate-limit", () => {
+    expect(isRateLimitError(500, "internal error")).toBe(false);
+    expect(isRateLimitError(502, "bad gateway")).toBe(false);
+    expect(isRateLimitError(401, "invalid key")).toBe(false);
   });
 });

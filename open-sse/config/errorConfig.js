@@ -44,6 +44,11 @@ export const TRANSIENT_COOLDOWN_MS = 30 * 1000;
 // resets the counter so the next failure starts back at the base.
 export const MODEL_FAILURE_BACKOFF_BASE_MS = 30 * 1000;
 export const MODEL_FAILURE_BACKOFF_MAX_MS = 30 * 60 * 1000;
+// Idle window after which the per-model failure counter resets to a fresh
+// start. Must exceed MODEL_FAILURE_BACKOFF_MAX_MS so a capped block is never
+// shorter than the reset window (otherwise chronic-dead models oscillate
+// ramp -> reset -> ramp instead of staying capped). 60min = 2x the 30min cap.
+export const MODEL_FAILURE_IDLE_RESET_MS = 60 * 60 * 1000;
 
 
 // Short account/provider cooldown for busy or concurrency gates.
