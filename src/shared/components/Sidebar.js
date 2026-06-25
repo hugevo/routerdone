@@ -130,16 +130,16 @@ export default function Sidebar({ onClose }) {
               <h1 className="text-lg font-semibold tracking-tight text-text-main">
                 {APP_CONFIG.name}
               </h1>
-              <span className="text-xs text-text-muted">routerdone v{APP_CONFIG.gatewayVersion}</span>
+              <span className="text-xs text-text-muted">Version: {APP_CONFIG.version}</span>
               <span className="text-[11px] text-text-subtle">
-                Version: {APP_CONFIG.version}
+                Core: {versionInfo?.latestVersion || "…"}
               </span>
             </div>
           </Link>
           {updateInfo && (
             <div className="flex flex-col gap-1.5 rounded p-1 -m-1">
               <span className="text-xs font-semibold text-green-600 dark:text-amber-500">
-                ↑ Core: {versionInfo?.currentVersion}
+                ↑ Update: v{updateInfo?.latestVersion}
               </span>
               <div className="flex items-center gap-2">
                 <button
