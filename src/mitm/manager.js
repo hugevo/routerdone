@@ -1,4 +1,4 @@
-﻿const { exec, spawn, execSync } = require("child_process");
+const { exec, spawn, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -813,7 +813,10 @@ async function disableToolDNS(tool, sudoPassword) {
  */
 async function trustCert(sudoPassword) {
   const rootCACertPath = path.join(MITM_DIR, "rootCA.crt");
-  if (!fs.existsSync(rootCACertPath)) throw new Error("Root CA not found. Start server first to generate it.");
+  if (!fs.existsSync(rootCACertPath) || isCertExpired(rootCACertPath)) {
+    await generateCert();
+  }
+  if (!fs.existsSync(rootCACertPath)) throw new Error("Root CA not found. Generate it first.");
   const { installCert } = require("./cert/install");
   if (!IS_WIN && !IS_MAC && !isSudoAvailable()) {
     log(`🔐 Cert: system trust unavailable (no sudo). Use file: ${rootCACertPath}`);
