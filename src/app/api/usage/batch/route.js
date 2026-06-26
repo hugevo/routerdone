@@ -1,4 +1,4 @@
-﻿import { fetchConnectionUsage } from "../_shared";
+import { fetchConnectionUsageCached, readQuotaCache } from "../_shared";
 
 const MAX_BATCH_SIZE = 100;
 
@@ -12,9 +12,10 @@ function normalizeConnectionIds(rawIds) {
  * POST /api/usage/batch
  * Body: { connectionIds: string[] }
  *
- * Moves the quota fan-out from browser to server. The client sends one
- * request, then the server fetches all connection quotas concurrently and
- * returns isolated per-connection results.
+ * Server-side stale-while-revalidate: returns cached quota instantly for
+ * warm entries, fetches only cache misses, and triggers background refresh
+ * for stale entries so the next request is fast. A per-connection timeout
+ * prevents one slow upstream from blocking the entire batch.
  */
 export async function POST(request) {
   let body = {};
@@ -29,15 +30,40 @@ export async function POST(request) {
     return Response.json({ results: {}, requested: 0 });
   }
 
-  const entries = await Promise.all(
-    connectionIds.map(async (connectionId) => [
-      connectionId,
-      await fetchConnectionUsage(connectionId),
-    ]),
-  );
+  const results = {};
+  const toFetch = [];
+
+  for (const id of connectionIds) {
+    const cached = readQuotaCache(id);
+    if (cached) {
+      results[id] = {
+        ...cached.value,
+        cacheStatus: cached.cacheStatus,
+        cachedAt: cached.cachedAt,
+      };
+      if (cached.cacheStatus === "stale") {
+        // Background refresh - do not block the response
+        fetchConnectionUsageCached(id).catch(() => {});
+      }
+    } else {
+      toFetch.push(id);
+    }
+  }
+
+  if (toFetch.length > 0) {
+    const fetched = await Promise.all(
+      toFetch.map(async (id) => [id, await fetchConnectionUsageCached(id)]),
+    );
+    for (const [id, result] of fetched) {
+      results[id] = {
+        ...result,
+        cacheStatus: result?.ok ? "fresh" : "miss",
+      };
+    }
+  }
 
   return Response.json({
-    results: Object.fromEntries(entries),
+    results,
     requested: connectionIds.length,
   });
 }

@@ -147,3 +147,78 @@ export async function fetchConnectionUsage(connectionId) {
     return { ok: false, status: 500, error: error.message };
   }
 }
+
+// --- Server-side quota cache (stale-while-revalidate) ---
+// In-memory cache shared across requests. Returns fresh results instantly,
+// stale results instantly + triggers a background refresh, and caps each
+// upstream fetch with a timeout so one slow provider can't block the batch.
+
+const QUOTA_CACHE = new Map(); // connectionId -> { value, fetchedAt, pending }
+const QUOTA_FRESH_TTL_MS = 30_000;
+const QUOTA_STALE_TTL_MS = 300_000;
+const QUOTA_FETCH_TIMEOUT_MS = 7_000;
+
+/**
+ * Read cached quota for a connection.
+ * Returns { value, cacheStatus, cachedAt } or null if expired / no cache.
+ *  - cacheStatus "fresh": within fresh TTL — no refetch needed
+ *  - cacheStatus "stale": past fresh but within stale TTL — serve + revalidate
+ */
+export function readQuotaCache(connectionId) {
+  const entry = QUOTA_CACHE.get(connectionId);
+  if (!entry || !entry.value) return null;
+  const age = Date.now() - entry.fetchedAt;
+  if (age < QUOTA_FRESH_TTL_MS) {
+    return { value: entry.value, cacheStatus: "fresh", cachedAt: entry.fetchedAt };
+  }
+  if (age < QUOTA_STALE_TTL_MS) {
+    return { value: entry.value, cacheStatus: "stale", cachedAt: entry.fetchedAt };
+  }
+  QUOTA_CACHE.delete(connectionId);
+  return null;
+}
+
+function writeQuotaCache(connectionId, value) {
+  const existing = QUOTA_CACHE.get(connectionId);
+  QUOTA_CACHE.set(connectionId, {
+    value,
+    fetchedAt: Date.now(),
+    pending: existing?.pending || null,
+  });
+}
+
+/**
+ * Fetch usage with single-flight dedup + per-connection timeout.
+ * If a fetch is already in-flight for this connectionId, reuses it.
+ * Caches successful results. Returns { ok, data } | { ok:false, status, error }.
+ */
+export function fetchConnectionUsageCached(connectionId) {
+  const entry = QUOTA_CACHE.get(connectionId);
+  if (entry?.pending) return entry.pending;
+
+  const promise = (async () => {
+    const timeout = new Promise((resolve) =>
+      setTimeout(
+        () => resolve({ ok: false, status: 504, error: "Usage refresh timed out" }),
+        QUOTA_FETCH_TIMEOUT_MS,
+      ),
+    );
+    const result = await Promise.race([
+      fetchConnectionUsage(connectionId),
+      timeout,
+    ]);
+    if (result?.ok) {
+      writeQuotaCache(connectionId, result);
+    }
+    const cur = QUOTA_CACHE.get(connectionId);
+    if (cur) cur.pending = null;
+    return result;
+  })();
+
+  if (entry) {
+    entry.pending = promise;
+  } else {
+    QUOTA_CACHE.set(connectionId, { value: null, fetchedAt: 0, pending: promise });
+  }
+  return promise;
+}

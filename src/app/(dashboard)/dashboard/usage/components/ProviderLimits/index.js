@@ -11,7 +11,6 @@ import {
   getConnectionLabel,
   getConnectionQuotaRemaining,
   sortVisibleConnections,
-  buildLoadingState,
   filterQuotaStateByConnections,
   getConnectionsEmptyMessage,
   getPageSizeLabel,
@@ -264,16 +263,18 @@ export default function ProviderLimits() {
 
   // Batch-fetch quotas for many connections in a single request.
   // Replaces the N+1 per-connection fetches that bottlenecked the quota page.
-  const fetchQuotaBatch = useCallback(async (conns) => {
+  const fetchQuotaBatch = useCallback(async (conns, { showLoading = true } = {}) => {
     if (!conns || conns.length === 0) return;
     const ids = conns.map((c) => c.id);
     const providerById = new Map(conns.map((c) => [c.id, c.provider]));
 
-    setLoading((prev) => {
-      const next = { ...prev };
-      for (const id of ids) next[id] = true;
-      return next;
-    });
+    if (showLoading) {
+      setLoading((prev) => {
+        const next = { ...prev };
+        for (const id of ids) next[id] = true;
+        return next;
+      });
+    }
     setErrors((prev) => {
       const next = { ...prev };
       for (const id of ids) next[id] = null;
@@ -519,7 +520,13 @@ export default function ProviderLimits() {
       const visibleConnections = await fetchConnections(page);
       const toFetch = visibleConnections.filter(shouldFetch);
 
-      setLoading(buildLoadingState(toFetch));
+      setLoading((prev) => {
+        const next = { ...prev };
+        for (const conn of toFetch) {
+          next[conn.id] = !quotaData[conn.id];
+        }
+        return next;
+      });
       setErrors((prev) =>
         filterQuotaStateByConnections(prev, visibleConnections),
       );
@@ -535,7 +542,7 @@ export default function ProviderLimits() {
     } finally {
       setRefreshingAll(false);
     }
-  }, [refreshingAll, fetchConnections, fetchQuotaBatch, page]);
+  }, [refreshingAll, fetchConnections, fetchQuotaBatch, page, quotaData]);
 
   useEffect(() => {
     const initializeData = async () => {
@@ -565,7 +572,7 @@ export default function ProviderLimits() {
       );
 
       // Fetch fresh quota in background via a single batch request
-      await fetchQuotaBatch(visibleConnections);
+      await fetchQuotaBatch(visibleConnections, { showLoading: false });
       setLastUpdated(new Date());
     };
 
@@ -1222,8 +1229,9 @@ export default function ProviderLimits() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {sortedConnections.map((conn) => {
           const quota = quotaData[conn.id];
-          const isLoading = loading[conn.id];
+          const isLoading = Boolean(loading[conn.id]);
           const error = errors[conn.id];
+          const hasQuotaSnapshot = Boolean(quota);
 
           // Use table layout for all providers
           const isInactive = conn.isActive === false;
@@ -1424,13 +1432,13 @@ export default function ProviderLimits() {
               </div>
 
               <div className="px-2 py-1.5">
-                {isLoading ? (
+                {isLoading && !hasQuotaSnapshot ? (
                   <div className="text-center py-5 text-text-muted">
                     <span className="material-symbols-outlined text-[28px] animate-spin">
                       progress_activity
                     </span>
                   </div>
-                ) : error ? (
+                ) : error && !hasQuotaSnapshot ? (
                   <div className="text-center py-5">
                     <span className="material-symbols-outlined text-[28px] text-red-500">
                       error
