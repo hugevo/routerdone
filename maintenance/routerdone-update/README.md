@@ -18,8 +18,10 @@ RouterDone la public fork cua upstream 9Router (MIT, decolua).
 ## Khi Upstream Co Ban Moi
 
 1. Doc version upstream moi:
-   `npm view 9router version`
+   `gh release view --repo decolua/9router --json tagName`
+   Fallback neu GitHub API bi rate-limit: `npm view 9router version`
 2. Chay script update (xem `sync-routerdone-from-9router.ps1`):
+   - Lay latest tu GitHub Releases `decolua/9router` (fallback git tags/npm).
    - Clone upstream version moi ve thu muc tam.
    - Apply `patches/routerdone-custom.patch`.
    - Apply `patches/features/*.patch` theo thu tu (xem PATCH_ORDER.md).

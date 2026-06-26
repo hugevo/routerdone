@@ -1,7 +1,7 @@
 services:
   routerdone:
     type: docker-compose
-    composeFile: docker-compose.yml
+    composeFile: docker-compose.dokploy.yml
     env:
       PORT: "20128"
       NODE_ENV: production
