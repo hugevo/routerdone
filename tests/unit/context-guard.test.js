@@ -189,3 +189,63 @@ describe("formatContextGuardLog", () => {
     expect(line).toContain("2KB"); // 2048/1024 = 2
   });
 });
+describe("guardContext - isCompact direct bypass", () => {
+  // Covers the internal isCompact option branch directly, distinct from the
+  // caller disabling via enabled: ... && !body._compact. chatCore passes
+  // isCompact alongside enabled, so both paths must skip eviction.
+  it("isCompact: true skips eviction and preserves all encrypted_content", () => {
+    const body = makeBody(10, 200_000);
+    const stats = guardContext(body, { enabled: true, maxBytes: 1, keepRecent: 3, isCompact: true });
+    expect(stats).toBeNull();
+    for (let i = 1; i <= 10; i++) {
+      expect(body.input[i].encrypted_content).toBeDefined();
+    }
+  });
+
+  it("isCompact: false with enabled true still evicts (sanity)", () => {
+    const body = makeBody(10, 200_000);
+    const stats = guardContext(body, { enabled: true, maxBytes: 1, keepRecent: 3, isCompact: false });
+    expect(stats).not.toBeNull();
+    expect(stats.evictedItems).toBe(7);
+  });
+});
+
+describe("estimateInputTokens", () => {
+  it("returns 0 for null/empty/missing bodies", () => {
+    expect(estimateInputTokens(null)).toBe(0);
+    expect(estimateInputTokens({})).toBe(0);
+    expect(estimateInputTokens({ input: [] })).toBe(0);
+    expect(estimateInputTokens({ messages: [] })).toBe(0);
+    expect(estimateInputTokens(undefined)).toBe(0);
+  });
+
+  it("counts content and encrypted_content", () => {
+    const body = makeBody(2, 200_000);
+    const tokens = estimateInputTokens(body);
+    expect(tokens).toBeGreaterThan(0);
+    // 400_000 bytes / 4 = ~100_000 tokens
+    expect(tokens).toBeGreaterThanOrEqual(90_000);
+    expect(tokens).toBeLessThanOrEqual(110_000);
+  });
+
+  it("counts array content text parts", () => {
+    const body = {
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "x".repeat(4000) }] },
+      ],
+    };
+    const tokens = estimateInputTokens(body);
+    expect(tokens).toBe(1000);
+  });
+
+  it("counts messages-format body", () => {
+    const body = {
+      messages: [
+        { role: "user", content: "hello world" },
+        reasoningItem(0, 800),
+      ],
+    };
+    const tokens = estimateInputTokens(body);
+    expect(tokens).toBeGreaterThan(0);
+  });
+});
