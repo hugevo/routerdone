@@ -2,14 +2,14 @@ import https from "https";
 import pkg from "../../../../package.json" with { type: "json" };
 import { APP_CONFIG } from "@/shared/constants/config";
 
-const NPM_PACKAGE_NAME = "routerdone";
+const APP_GITHUB_REPO = "thoa100m/routerdone";
+const UPSTREAM_GITHUB_REPO = "decolua/9router";
 
-
-// Fetch latest GitHub release tag
-function fetchGithubLatestRelease() {
+// Fetch latest GitHub release tag (strips leading "v")
+function fetchGithubLatestRelease(repo) {
   return new Promise((resolve) => {
     const req = https.get(
-      "https://api.github.com/repos/thoa100m/routerdone/releases/latest",
+      `https://api.github.com/repos/${repo}/releases/latest`,
       {
         timeout: 4000,
         headers: {
@@ -35,29 +35,6 @@ function fetchGithubLatestRelease() {
   });
 }
 
-// Fetch latest version from npm registry
-function fetchLatestVersion() {
-  return new Promise((resolve) => {
-    const req = https.get(
-      `https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`,
-      { timeout: 4000 },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          try {
-            resolve(JSON.parse(data).version || null);
-          } catch {
-            resolve(null);
-          }
-        });
-      }
-    );
-    req.on("error", () => resolve(null));
-    req.on("timeout", () => { req.destroy(); resolve(null); });
-  });
-}
-
 function compareVersions(a, b) {
   const pa = a.split(".").map(Number);
   const pb = b.split(".").map(Number);
@@ -70,8 +47,8 @@ function compareVersions(a, b) {
 
 export async function GET() {
   const [latestVersion, githubLatestVersion] = await Promise.all([
-    fetchLatestVersion(),
-    fetchGithubLatestRelease(),
+    fetchGithubLatestRelease(UPSTREAM_GITHUB_REPO),
+    fetchGithubLatestRelease(APP_GITHUB_REPO),
   ]);
   const currentVersion = pkg.version;
   const coreVersion = APP_CONFIG.coreVersion;
