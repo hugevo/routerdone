@@ -1,1 +1,40 @@
-services:\n  app:\n    build:\n      context: .\n      dockerfile: Dockerfile\n      no_cache: true\n    restart: unless-stopped\n    environment:\n      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}\n      INITIAL_PASSWORD: ${INITIAL_PASSWORD:?set INITIAL_PASSWORD}\n      DATA_DIR: ${DATA_DIR:-/app/data}\n      PORT: ${PORT:-20128}\n      HOSTNAME: ${HOSTNAME:-0.0.0.0}\n      NODE_ENV: ${NODE_ENV:-production}\n      NEXT_TELEMETRY_DISABLED: ${NEXT_TELEMETRY_DISABLED:-1}\n      BASE_URL: ${BASE_URL:?set BASE_URL}\n      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:?set NEXT_PUBLIC_BASE_URL}\n      API_KEY_SECRET: ${API_KEY_SECRET:?set API_KEY_SECRET}\n      MACHINE_ID_SALT: ${MACHINE_ID_SALT:?set MACHINE_ID_SALT}\n      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}\n      REQUIRE_API_KEY: ${REQUIRE_API_KEY:-true}\n      ENABLE_REQUEST_LOGS: ${ENABLE_REQUEST_LOGS:-false}\n      OBSERVABILITY_ENABLED: ${OBSERVABILITY_ENABLED:-true}\n    expose:\n      - "20128"\n    volumes:\n      - routerdone-data:/app/data\n    healthcheck:\n      test:\n        [\n          "CMD-SHELL",\n          "node -e \"fetch('http://127.0.0.1:20128/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""\n        ]\n      interval: 30s\n      timeout: 10s\n      retries: 5\n      start_period: 60s\n\nvolumes:\n  routerdone-data:\n
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      no_cache: true
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      INITIAL_PASSWORD: ${INITIAL_PASSWORD:?set INITIAL_PASSWORD}
+      DATA_DIR: ${DATA_DIR:-/app/data}
+      PORT: ${PORT:-20128}
+      HOSTNAME: ${HOSTNAME:-0.0.0.0}
+      NODE_ENV: ${NODE_ENV:-production}
+      NEXT_TELEMETRY_DISABLED: ${NEXT_TELEMETRY_DISABLED:-1}
+      BASE_URL: ${BASE_URL:?set BASE_URL}
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:?set NEXT_PUBLIC_BASE_URL}
+      API_KEY_SECRET: ${API_KEY_SECRET:?set API_KEY_SECRET}
+      MACHINE_ID_SALT: ${MACHINE_ID_SALT:?set MACHINE_ID_SALT}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      REQUIRE_API_KEY: ${REQUIRE_API_KEY:-true}
+      ENABLE_REQUEST_LOGS: ${ENABLE_REQUEST_LOGS:-false}
+      OBSERVABILITY_ENABLED: ${OBSERVABILITY_ENABLED:-true}
+    expose:
+      - "20128"
+    volumes:
+      - routerdone-data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:20128/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  routerdone-data:
