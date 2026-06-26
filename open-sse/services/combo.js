@@ -58,6 +58,24 @@ function markComboCooldown(modelStr) {
   return until;
 }
 
+// Cooldown is a soft de-prioritization, not a hard skip. Models still inside
+// their preflight cooldown window sink to the end of the attempt order so a
+// known-live model is always reachable, but no model is ever dropped. A stable
+// partition keeps the relative order of both groups intact.
+function deprioritizeCoolingModels(models, comboLogPrefix, log) {
+  if (!Array.isArray(models) || models.length <= 1) return models;
+  const now = Date.now();
+  const ready = [];
+  const cooling = [];
+  for (const m of models) {
+    if (getComboCooldownUntil(m) > now) cooling.push(m);
+    else ready.push(m);
+  }
+  if (cooling.length === 0 || ready.length === 0) return models;
+  log?.info?.("COMBO", `${comboLogPrefix} | deprioritize cooling models=[${cooling.join(",")}]`);
+  return [...ready, ...cooling];
+}
+
 function isPreflightTimeoutText(errorText) {
   const text = String(errorText || "").toLowerCase();
   return text.includes("upstream first byte timeout") || text.includes("upstream first productive timeout");
@@ -267,6 +285,14 @@ export function resetComboRotation(comboName) {
 }
 
 /**
+ * Reset the in-memory combo model cooldown map. Test-only helper so the
+ * module-level cooldown state does not leak across cases.
+ */
+export function resetComboCooldowns() {
+  comboModelCooldowns.clear();
+}
+
+/**
  * Get combo models from combos data
  * @param {string} modelStr - Model string to check
  * @param {Array|Object} combosData - Array of combos or object with combos
@@ -329,6 +355,8 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   const retryDelayMs = normalizeRetryDelayMs(policy.retry.delayMs);
   const totalDeadline = Date.now() + policy.stream.totalBudgetMs;
 
+  rotatedModels = deprioritizeCoolingModels(rotatedModels, comboLogPrefix, log);
+
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
@@ -341,12 +369,6 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       break;
     }
     const modelStr = rotatedModels[i];
-    const cooldownUntil = getComboCooldownUntil(modelStr);
-    if (cooldownUntil > Date.now()) {
-      summary.skipped++;
-      log.info("COMBO", `${comboLogPrefix} | skip cooldown model=${modelStr} until=${formatConsoleTimeGmt7(cooldownUntil)}`);
-      continue;
-    }
     summary.tried++;
     log.info("COMBO", `${comboLogPrefix} | Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
 

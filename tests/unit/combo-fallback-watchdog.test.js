@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
-import { handleComboChat, getRotatedModels, resetComboRotation } from "../../open-sse/services/combo.js";
+import { handleComboChat, getRotatedModels, resetComboRotation, resetComboCooldowns } from "../../open-sse/services/combo.js";
 import { parseResetAfterText, parseRetryAfterHeader } from "../../open-sse/utils/error.js";
 import { guardInitialStream, isProductiveStreamChunk } from "../../open-sse/handlers/chatCore/streamingHandler.js";
 import { resolveRoutePolicy } from "../../open-sse/services/routePolicy.js";
 import { isBusyConcurrencyError, shouldLockConnectionForError, resolveConnectionCooldownMs } from "../../open-sse/services/accountFallback.js";
 
 describe("adaptive combo fallback", () => {
-  beforeEach(() => resetComboRotation());
+  beforeEach(() => { resetComboRotation(); resetComboCooldowns(); });
 
   const log = { info: () => {}, warn: () => {}, debug: () => {} };
 
@@ -67,6 +67,86 @@ describe("adaptive combo fallback", () => {
     });
     expect(res.ok).toBe(true);
     expect(tried).toEqual(["p/b", "p/c"]);
+  });
+
+  it("still attempts a cooling model instead of hard-skipping it (live model always reachable)", async () => {
+    // 1st request: model trips a preflight-timeout, which arms its in-memory
+    // combo cooldown window.
+    let phase = "warm";
+    const run = () => handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/only"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async () => {
+        if (phase === "warm") {
+          return new Response(
+            JSON.stringify({ error: { message: "Upstream first productive timeout (9s)" } }),
+            { status: 502 },
+          );
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+
+    const first = await run();
+    expect(first.ok).toBe(false);
+
+    // 2nd request: the same model is now in cooldown but is alive again. It must
+    // still be tried (soft de-prioritization), not skipped into an all-failed 503.
+    phase = "live";
+    const tried = [];
+    const second = await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/only"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async (_body, model) => {
+        tried.push(model);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    expect(tried).toEqual(["p/only"]);
+    expect(second.ok).toBe(true);
+  });
+
+  it("sinks a cooling model to the end but still reaches it when others fail", async () => {
+    // Arm cooldown on p/a via a preflight timeout.
+    await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/a"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async () => new Response(
+        JSON.stringify({ error: { message: "upstream first productive timeout" } }),
+        { status: 502 },
+      ),
+    });
+
+    // p/a is cooling and p/b fails: p/a must be moved last but STILL tried, and
+    // since it is alive again the combo succeeds.
+    const tried = [];
+    const res = await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/a", "p/b"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async (_body, model) => {
+        tried.push(model);
+        if (model === "p/b") return new Response(JSON.stringify({ error: { message: "bad gateway" } }), { status: 502 });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    expect(tried).toEqual(["p/b", "p/a"]);
+    expect(res.ok).toBe(true);
   });
 
   it("emits combo summary counters", async () => {
