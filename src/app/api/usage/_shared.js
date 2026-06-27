@@ -158,6 +158,21 @@ const QUOTA_FRESH_TTL_MS = 30_000;
 const QUOTA_STALE_TTL_MS = 300_000;
 const QUOTA_FETCH_TIMEOUT_MS = 7_000;
 
+function getEarliestQuotaResetMs(result) {
+  const quotas = result?.data?.quotas;
+  if (!quotas || typeof quotas !== "object") return null;
+
+  const times = Object.values(quotas)
+    .map((quota) => {
+      const time = quota?.resetAt ? new Date(quota.resetAt).getTime() : NaN;
+      return Number.isFinite(time) ? time : null;
+    })
+    .filter((time) => time && time > 0);
+
+  return times.length > 0 ? Math.min(...times) : null;
+}
+
+
 /**
  * Read cached quota for a connection.
  * Returns { value, cacheStatus, cachedAt } or null if expired / no cache.
@@ -167,7 +182,14 @@ const QUOTA_FETCH_TIMEOUT_MS = 7_000;
 export function readQuotaCache(connectionId) {
   const entry = QUOTA_CACHE.get(connectionId);
   if (!entry || !entry.value) return null;
-  const age = Date.now() - entry.fetchedAt;
+  const now = Date.now();
+  const resetMs = getEarliestQuotaResetMs(entry.value);
+  if (resetMs && now >= resetMs) {
+    QUOTA_CACHE.delete(connectionId);
+    return null;
+  }
+
+  const age = now - entry.fetchedAt;
   if (age < QUOTA_FRESH_TTL_MS) {
     return { value: entry.value, cacheStatus: "fresh", cachedAt: entry.fetchedAt };
   }

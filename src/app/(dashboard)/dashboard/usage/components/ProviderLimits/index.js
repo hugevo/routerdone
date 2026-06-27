@@ -158,6 +158,7 @@ export default function ProviderLimits() {
   const hydratedRef = useRef(false);
   const countdownRef = useRef(null);
   const tickCountRef = useRef(0);
+  const resetRefreshTimerRef = useRef(null);
 
   const fetchConnections = useCallback(
     async (targetPage = page) => {
@@ -857,6 +858,42 @@ export default function ProviderLimits() {
   useEffect(() => {
     connectionsRef.current = connections;
   }, [connections]);
+
+  useEffect(() => {
+    if (!autoManage) return;
+    if (resetRefreshTimerRef.current) {
+      clearTimeout(resetRefreshTimerRef.current);
+      resetRefreshTimerRef.current = null;
+    }
+
+    const now = Date.now();
+    const nextReset = Object.values(quotaData)
+      .flatMap((entry) => entry?.quotas || [])
+      .map((quota) => quota?.resetAt ? new Date(quota.resetAt).getTime() : NaN)
+      .filter((time) => Number.isFinite(time) && time > now)
+      .sort((a, b) => a - b)[0];
+
+    if (!nextReset) return;
+
+    const delay = Math.min(Math.max(nextReset - now + 2000, 1000), 2_147_483_647);
+    resetRefreshTimerRef.current = setTimeout(() => {
+      const conns = connectionsRef.current.filter((conn) =>
+        conn.authType === "oauth" && isUsageEligible(conn) && !(conn.isActive ?? true)
+      );
+      if (conns.length > 0) {
+        fetchQuotaBatch(conns, { showLoading: false });
+      } else {
+        refreshAll(true);
+      }
+    }, delay);
+
+    return () => {
+      if (resetRefreshTimerRef.current) {
+        clearTimeout(resetRefreshTimerRef.current);
+        resetRefreshTimerRef.current = null;
+      }
+    };
+  }, [autoManage, quotaData, fetchQuotaBatch, refreshAll]);
 
   // Auto-manage: disable depleted connections, re-enable fully available ones.
   // AND condition: a connection is re-enabled only when ALL quota types
