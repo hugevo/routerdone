@@ -7,6 +7,76 @@ const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
+const DEFAULT_USAGE_TIME_ZONE = "Asia/Saigon";
+
+function getUsageTimeZone() {
+  const timeZone = process.env.TZ || process.env.NEXT_PUBLIC_TZ || DEFAULT_USAGE_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return DEFAULT_USAGE_TIME_ZONE;
+  }
+}
+
+function getZonedParts(timestamp = Date.now(), timeZone = getUsageTimeZone()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(timestamp));
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour === "24" ? "0" : map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+  };
+}
+
+function getTimeZoneOffsetMs(timestamp, timeZone = getUsageTimeZone()) {
+  const parts = getZonedParts(timestamp, timeZone);
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return asUtc - timestamp;
+}
+
+function zonedTimeToUtcMs(year, month, day, hour = 0, minute = 0, second = 0, timeZone = getUsageTimeZone()) {
+  let utc = Date.UTC(year, month - 1, day, hour, minute, second);
+  let offset = getTimeZoneOffsetMs(utc, timeZone);
+  utc -= offset;
+  const correctedOffset = getTimeZoneOffsetMs(utc, timeZone);
+  if (correctedOffset !== offset) utc -= correctedOffset - offset;
+  return utc;
+}
+
+function getUsageDateKey(timestamp = Date.now(), timeZone = getUsageTimeZone()) {
+  const parts = getZonedParts(timestamp, timeZone);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function formatUsageHour(timestamp, timeZone = getUsageTimeZone()) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp));
+}
+
+function formatUsageDay(timestamp, timeZone = getUsageTimeZone()) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+  }).format(new Date(timestamp));
+}
 
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
@@ -30,8 +100,7 @@ const connCache = global._connectionMapCache;
 export const statsEmitter = global._statsEmitter;
 
 function getLocalDateKey(timestamp) {
-  const d = timestamp ? new Date(timestamp) : new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return getUsageDateKey(timestamp ? new Date(timestamp).getTime() : Date.now());
 }
 
 function addToCounter(target, key, values) {
@@ -361,9 +430,10 @@ function loadDaysInRange(adapter, maxDays) {
   if (maxDays == null) {
     return adapter.all(`SELECT dateKey, data FROM usageDaily`);
   }
-  const today = new Date();
-  const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - maxDays + 1);
-  const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+  const timeZone = getUsageTimeZone();
+  const todayParts = getZonedParts(Date.now(), timeZone);
+  const cutoffMs = zonedTimeToUtcMs(todayParts.year, todayParts.month, todayParts.day - maxDays + 1, 0, 0, 0, timeZone);
+  const cutoffKey = getUsageDateKey(cutoffMs, timeZone);
   return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
 }
 
@@ -670,16 +740,15 @@ export async function getUsageStats(period = "all") {
 export async function getChartData(period = "7d") {
   const db = await getAdapter();
   const now = Date.now();
+  const timeZone = getUsageTimeZone();
 
   if (period === "today") {
     const bucketCount = 24;
     const bucketMs = 3600000;
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const startTime = startOfDay.getTime();
+    const todayParts = getZonedParts(now, timeZone);
+    const startTime = zonedTimeToUtcMs(todayParts.year, todayParts.month, todayParts.day, 0, 0, 0, timeZone);
     const endTime = startTime + bucketCount * bucketMs;
-    const labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
+    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: formatUsageHour(startTime + i * bucketMs, timeZone), tokens: 0, cost: 0 }));
 
     const rows = db.all(
       `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
@@ -700,9 +769,8 @@ export async function getChartData(period = "7d") {
   if (period === "24h") {
     const bucketCount = 24;
     const bucketMs = 3600000;
-    const labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
     const startTime = now - bucketCount * bucketMs;
-    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
+    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: formatUsageHour(startTime + i * bucketMs, timeZone), tokens: 0, cost: 0 }));
 
     const rows = db.all(
       `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
@@ -719,27 +787,24 @@ export async function getChartData(period = "7d") {
   }
 
   const bucketCount = period === "7d" ? 7 : period === "30d" ? 30 : 60;
-  const today = new Date();
-  const labelFn = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const todayParts = getZonedParts(now, timeZone);
 
-  // Build map of dateKey → day data
+  // Build map of dateKey -> day data
   const dayRows = loadDaysInRange(db, bucketCount);
   const dayMap = {};
   for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
 
   return Array.from({ length: bucketCount }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - (bucketCount - 1 - i));
-    const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const dayStart = zonedTimeToUtcMs(todayParts.year, todayParts.month, todayParts.day - (bucketCount - 1 - i), 0, 0, 0, timeZone);
+    const dateKey = getUsageDateKey(dayStart, timeZone);
     const dayData = dayMap[dateKey];
     return {
-      label: labelFn(d),
+      label: formatUsageDay(dayStart, timeZone),
       tokens: dayData ? (dayData.promptTokens || 0) + (dayData.completionTokens || 0) : 0,
       cost: dayData ? (dayData.cost || 0) : 0,
     };
   });
 }
-
 function formatLogDate(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
