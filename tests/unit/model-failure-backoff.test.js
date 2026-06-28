@@ -146,6 +146,16 @@ describe("provider self-heal errors", () => {
     expect(isProviderSelfHealError(400, errorText)).toBe(true);
   });
 
+  it("classifies tools plus response_format conflicts as short self-heal provider errors", () => {
+    const errorText = "Upstream stream error: tools and response_format cannot be combined. Pick one: use tools for function calling or response_format for structured output.";
+    const r = checkFallbackError(400, errorText);
+    expect(r).toMatchObject({
+      shouldFallback: true,
+      cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS,
+      selfHeal: true,
+    });
+    expect(isProviderSelfHealError(400, errorText)).toBe(true);
+  });
   it("does not bump model failure counters for self-heal errors", () => {
     const conn = {
       "modelFailure_claude-opus-4-8": 4,

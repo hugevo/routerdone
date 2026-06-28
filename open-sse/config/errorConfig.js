@@ -89,6 +89,7 @@ export const ERROR_RULES = [
   { text: "context length exceeded",  cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
   { text: "maximum context length",   cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
   { text: "reduce conversation context", cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "tools and response_format cannot be combined", cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
 
   // --- Text-based rules (checked first, order = priority) ---
   { text: "no credentials",           cooldownMs: COOLDOWN.long },
