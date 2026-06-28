@@ -1,4 +1,4 @@
-﻿import os from "os";
+import os from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync } from "fs";
@@ -13,7 +13,7 @@ import {
   RESTART_COOLDOWN_MS, NETWORK_SETTLE_MS,
   WATCHDOG_INTERVAL_MS, NETWORK_CHECK_INTERVAL_MS, VIRTUAL_IFACE_REGEX,
 } from "@/lib/tunnel";
-import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync } from "@/mitm/manager";
+import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync, isSudoPasswordRequired } from "@/mitm/manager";
 import { startClaudeAutoPing } from "@/shared/services/claudeAutoPing";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
 
@@ -105,8 +105,9 @@ async function autoStartMitm() {
     if (mitmStatus.running) return;
 
     const password = await loadEncryptedPassword();
-    if (!password && process.platform !== "win32") {
-      console.log("[InitApp] MITM was enabled but no saved password found, skipping auto-start");
+    const needsSudoPassword = process.platform !== "win32" && !password && isSudoPasswordRequired();
+    if (needsSudoPassword) {
+      console.log("[InitApp] MITM was enabled but sudo password is required and not saved, skipping auto-start");
       return;
     }
 
