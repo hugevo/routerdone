@@ -31,6 +31,9 @@ screenshots/
 *.pem
 *.tsbuildinfo
 next-env.d.ts
+.tmp*/
+.tmp*
+tests/.tmp*
 .vercel
 .idea/
 

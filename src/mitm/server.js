@@ -1,4 +1,4 @@
-﻿const https = require("https");
+const https = require("https");
 const http2 = require("http2");
 const tls = require("tls");
 const fs = require("fs");
@@ -387,7 +387,7 @@ function killPort(port) {
     } else {
       const out = execSync(`${LSOF_BIN} -nP -iTCP:${port} -sTCP:LISTEN -t`, { encoding: "utf-8", windowsHide: true }).trim();
       if (!out) return;
-      pidList = out.split("\n").filter(p => p && Number(p) !== process.pid);
+      pidList = out.split(/\r?\n/).map(s => s.trim()).filter(p => Number.isInteger(Number(p)) && Number(p) > 0 && Number(p) !== process.pid);
     }
     if (pidList.length === 0) return;
     pidList.forEach(pid => {
