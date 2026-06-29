@@ -751,8 +751,8 @@ export default function ProviderLimits() {
   };
 
   // A connection is quota-API blocked when the upstream quota API returned an
-  // auth/forbidden state (e.g. Antigravity "quota API authentication expired"
-  // or "quota API access forbidden"). The chat path may still work, but we
+  // auth/forbidden state (e.g. Antigravity "quota API authentication expired",
+  // "quota API access forbidden", or Codex usage API 401). The chat path may still work, but we
   // cannot trust quota numbers, so auto-manage must keep it disabled instead of
   // re-enabling it on stale/positive-looking data.
   const isConnectionQuotaBlocked = (conn) => {
@@ -761,6 +761,7 @@ export default function ProviderLimits() {
     return (
       msg.includes("quota api authentication expired") ||
       msg.includes("quota api access forbidden") ||
+      msg.includes("usage api temporarily unavailable (401)") ||
       msg.includes("authentication expired") ||
       msg.includes("access forbidden")
     );
