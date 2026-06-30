@@ -15,7 +15,7 @@ COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM ${NODE_IMAGE} AS runner
+FROM base AS runner
 WORKDIR /app
 
 LABEL org.opencontainers.image.title="routerdone"

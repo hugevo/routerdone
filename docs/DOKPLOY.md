@@ -17,11 +17,14 @@ NODE_ENV=production
 PORT=20128
 TZ=UTC
 DATA_DIR=/app/data
+NODE_IMAGE=node:22-alpine
 BASE_URL=https://your-routerdone-domain.example
 NEXT_PUBLIC_BASE_URL=https://your-routerdone-domain.example
 AUTH_COOKIE_SECURE=true
 REQUIRE_API_KEY=true
 ```
+
+`NODE_IMAGE` is optional. If the deploy server has intermittent Docker Hub TLS timeouts, point it at a reachable mirror that provides the same Node Alpine image.
 
 ## Persistent Volumes
 

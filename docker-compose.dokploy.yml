@@ -3,7 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      no_cache: true
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     environment:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
