@@ -11,6 +11,7 @@ import {
   getModelFailureAtKey,
   MODEL_LOCK_PREFIX,
   checkFallbackError,
+  isClientPayloadError,
   isProviderSelfHealError,
   shouldDisableConnectionForError,
 } from "../../open-sse/services/accountFallback.js";
@@ -115,6 +116,16 @@ describe("429 rate-limit neutrality", () => {
 });
 
 describe("provider self-heal errors", () => {
+  it("does not fallback or lock for invalid client image_url payloads", () => {
+    const errorText = "Invalid 'input[71].content[2].image_url'. Expected a valid URL, but got a value with an invalid format.";
+    expect(isClientPayloadError(400, errorText)).toBe(true);
+    expect(checkFallbackError(400, errorText)).toMatchObject({
+      shouldFallback: false,
+      cooldownMs: 0,
+      clientError: true,
+    });
+  });
+
   it("classifies empty upstream stream as a short self-heal provider error", () => {
     const r = checkFallbackError(502, "Empty upstream stream (terminal before productive)");
     expect(r).toMatchObject({

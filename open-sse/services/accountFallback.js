@@ -17,9 +17,19 @@ const PREFLIGHT_TIMEOUT_TEXT = [
   "upstream headers timeout",
 ];
 
+const CLIENT_PAYLOAD_ERROR_RULES = [
+  (text) => text.includes("image_url") && text.includes("expected a valid url"),
+];
+
 function normalizeErrorText(errorText) {
   if (!errorText) return "";
   return (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase();
+}
+
+export function isClientPayloadError(status, errorText) {
+  if (Number(status) !== 400) return false;
+  const lowerError = normalizeErrorText(errorText);
+  return !!lowerError && CLIENT_PAYLOAD_ERROR_RULES.some(rule => rule(lowerError));
 }
 
 /**
@@ -44,6 +54,10 @@ export function getQuotaCooldown(backoffLevel = 0) {
  */
 export function checkFallbackError(status, errorText, backoffLevel = 0) {
   const lowerError = normalizeErrorText(errorText);
+
+  if (isClientPayloadError(status, lowerError)) {
+    return { shouldFallback: false, cooldownMs: 0, clientError: true };
+  }
 
   for (const rule of ERROR_RULES) {
     // Text-based rule: match substring in error message
