@@ -6,7 +6,7 @@
 #   $env:PORT="20128"; $env:DIR="routerdone"; $env:INITIAL_PASSWORD="..."
 
 $ErrorActionPreference = "Stop"
-$Repo = "https://github.com/hugevo/routerdone.git"
+$Repo = "https://github.com/thoa100m/routerdone.git"
 $Dir  = if ($env:DIR) { $env:DIR } else { "routerdone" }
 $Port = if ($env:PORT) { $env:PORT } else { "20128" }
 

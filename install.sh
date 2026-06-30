@@ -9,7 +9,7 @@
 #   INITIAL_PASSWORD=... admin password (default: auto-generated, printed at end)
 set -euo pipefail
 
-REPO="https://github.com/hugevo/routerdone.git"
+REPO="https://github.com/thoa100m/routerdone.git"
 DIR="${DIR:-routerdone}"
 PORT="${PORT:-20128}"
 
